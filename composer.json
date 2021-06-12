@@ -1,0 +1,26 @@
+{
+    "name": "coercive/havelock",
+    "type": "library",
+    "description": "Coercive Security Havelock",
+    "homepage": "http://coercive.fr",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Anthony Moral",
+            "email": "contact@coercive.fr",
+            "homepage": "http://coercive.fr"
+        }
+    ],
+    "require": {
+        "php": ">=7.4",
+        "ext-openssl": "*",
+        "ext-sodium": "*",
+        "defuse/php-encryption": "^2.3.1",
+        "coercive/cookie": "^1.1.4"
+    },
+    "autoload": {
+        "psr-4": { "Coercive\\Security\\Havelock\\": "dist/" }
+    },
+    "minimum-stability" : "dev",
+    "prefer-stable" : true
+}
