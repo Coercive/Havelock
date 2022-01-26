@@ -73,19 +73,19 @@ class Havelock
 	/** @var Cookie */
 	private Cookie $cookie;
 
-	/** @var string */
-	private ? string $registryKp;
+	/** @var string|null */
+	private ? string $registryKp = null;
 
-	/** @var string */
-	private ? string $sessionKp;
+	/** @var string|null */
+	private ? string $sessionKp = null;
 
 	/** @var string[] */
 	private array $keys = [];
 
-	/** @var string */
+	/** @var string|null */
 	private ? string $session = null;
 
-	/** @var array */
+	/** @var array|null */
 	private ? array $data = null;
 
 	/**
