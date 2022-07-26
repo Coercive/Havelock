@@ -37,6 +37,15 @@ class Havelock
 	const DEFAULT_PREFIX_KEYS = 'HAVELOCK_KEY_';
 	const DEFAULT_EXPIRE = 365 * 24 * 60 * 60;
 
+	/** @var Sodium */
+	private Sodium $SodiumRegistry;
+
+	/** @var Sodium */
+	private Sodium $SodiumSession;
+
+	/** @var Cookie|null */
+	private ? Cookie $cookie = null;
+
 	/** @var string Used as key password */
 	private string $password;
 
@@ -70,15 +79,6 @@ class Havelock
 	/** @var string The session data directory */
 	private string $sessionDir;
 
-	/** @var Cookie */
-	private Cookie $cookie;
-
-	/** @var string|null */
-	private ? string $registryKp = null;
-
-	/** @var string|null */
-	private ? string $sessionKp = null;
-
 	/** @var string[] */
 	private array $keys = [];
 
@@ -110,7 +110,7 @@ class Havelock
 	 * @param string $cipher
 	 * @return string
 	 */
-	private function decrypt(string $cipher)
+	private function decrypt(string $cipher): string
 	{
 		try {
 			return Crypto::decryptWithPassword($cipher, $this->password);
@@ -118,53 +118,6 @@ class Havelock
 		catch (Exception $e) {
 			return '';
 		}
-	}
-
-	/**
-	 * Seal the message (registry / session)
-	 *
-	 * @param string $box
-	 * @param string $kp
-	 * @return string
-	 */
-	private function seal(string $box, string $kp): string
-	{
-		if($box && $kp) {
-			try {
-				$pk = sodium_crypto_box_publickey($kp);
-				return (string) sodium_crypto_box_seal($box, $pk);
-			}
-			catch (SodiumException $e) {
-				return '';
-			}
-			catch (TypeError $e) {
-				return '';
-			}
-		}
-		return '';
-	}
-
-	/**
-	 * Unseal the message (registry / session)
-	 *
-	 * @param string $box
-	 * @param string $kp
-	 * @return string
-	 */
-	private function unseal(string $box, string $kp): string
-	{
-		if($box && $kp) {
-			try {
-				return (string) sodium_crypto_box_seal_open($box, $kp);
-			}
-			catch (SodiumException $e) {
-				return '';
-			}
-			catch (TypeError $e) {
-				return '';
-			}
-		}
-		return '';
 	}
 
 	/**
@@ -176,9 +129,10 @@ class Havelock
 	 */
 	private function initRegistryKeyPair(): bool
 	{
-		if($this->registryKp) {
+		if($this->SodiumRegistry->getKeyPair()) {
 			return true;
 		}
+
 		$name = hash(self::HASH_ALGO, $this->name);
 		$private = $this->keyDir . DIRECTORY_SEPARATOR . $name . '.private';
 		$public = $this->keyDir . DIRECTORY_SEPARATOR . $name . '.public';
@@ -189,25 +143,25 @@ class Havelock
 				$sk = $this->decrypt($skCiphered);
 				$pk = $this->decrypt($pkCiphered);
 				if($sk && $pk) {
-					$this->registryKp = sodium_crypto_box_keypair_from_secretkey_and_publickey($sk, $pk);
+					$this->SodiumRegistry->setKeys($sk, $pk);
 				}
 			}
 		}
+
 		else {
-			$kp = sodium_crypto_box_keypair();
-			$sk = sodium_crypto_box_secretkey($kp);
-			$pk = sodium_crypto_box_publickey($kp);
-			$skCiphered = $this->encrypt($sk);
-			$pkCiphered = $this->encrypt($pk);
+			$this->SodiumRegistry->generateKey();
+			$skCiphered = $this->encrypt($this->SodiumRegistry->getSecretKey());
+			$pkCiphered = $this->encrypt($this->SodiumRegistry->getPublicKey());
 			if($skCiphered && $pkCiphered) {
 				$skSaved = $this->write($private, $skCiphered);
 				$pkSaved = $this->write($public, $pkCiphered);
-				if($skSaved && $pkSaved) {
-					$this->registryKp = $kp;
+				if(!$skSaved || !$pkSaved) {
+					$this->SodiumRegistry->resetKeys();
 				}
 			}
 		}
-		return (bool) $this->registryKp;
+
+		return (bool) $this->SodiumRegistry->getKeyPair();
 	}
 
 	/**
@@ -255,10 +209,10 @@ class Havelock
 			return [];
 		}
 
-		$encrypted = $this->seal(serialize([
-			'kp' => base64_encode($this->sessionKp),
+		$encrypted = $this->SodiumRegistry->seal(serialize([
+			'kp' => base64_encode($this->SodiumSession->getKeyPair()),
 			'id' => $this->session
-		]), $this->registryKp);
+		]));
 
 		$length = ceil(strlen($encrypted) / $this->nbKeys);
 		$chunks = str_split($encrypted, $length);
@@ -285,7 +239,7 @@ class Havelock
 		} while(true);
 		$this->data = [];
 		$this->session = $session;
-		$this->sessionKp = sodium_crypto_box_keypair();
+		$this->SodiumSession->generateKeys();
 		return $this->write($path, '');
 	}
 
@@ -330,6 +284,7 @@ class Havelock
 	 * Delete all registry files and cookies
 	 *
 	 * @return string List of sessions token contains in registry keys
+	 * @throws SodiumException
 	 */
 	private function deleteRegistryFiles(): string
 	{
@@ -353,8 +308,8 @@ class Havelock
 				$this->cookie->delete($this->prefixKeys . $k);
 			}
 		}
-		if($session && $this->sessionKp) {
-			$decrypted = $this->unseal($session, $this->sessionKp);
+		if($session && $this->SodiumSession->getKeyPair()) {
+			$decrypted = $this->SodiumSession->unseal($session);
 			$data = $decrypted ? unserialize($decrypted) : null;
 			return strval($data['id'] ?? '');
 		}
@@ -364,10 +319,10 @@ class Havelock
 	/**
 	 * Delete session file
 	 *
-	 * @param string $session [optional]
+	 * @param string|null $session [optional]
 	 * @return bool
 	 */
-	private function deleteSessionFile(string $session = null): bool
+	private function deleteSessionFile(? string $session = null): bool
 	{
 		if($session) {
 			$path = $this->sessionDir . DIRECTORY_SEPARATOR . $session;
@@ -387,10 +342,10 @@ class Havelock
 	/**
 	 * Remove all
 	 *
-	 * @param string $directory [optional]
+	 * @param string|null $directory [optional]
 	 * @return bool
 	 */
-	private function rmdir(string $directory = null): bool
+	private function rmdir(? string $directory = null): bool
 	{
 		if(!$directory) {
 			$directory = $this->mainDir;
@@ -455,10 +410,10 @@ class Havelock
 	 *
 	 * @param string $password
 	 * @param string $directory
-	 * @param Cookie $cookie [optional]
+	 * @param Cookie|null $cookie [optional]
 	 * @return void
 	 */
-	public function __construct(string $password, string $directory, Cookie $cookie = null)
+	public function __construct(string $password, string $directory, ? Cookie $cookie = null)
 	{
 		$this->password = $password;
 
@@ -473,6 +428,9 @@ class Havelock
 		}
 
 		$this->expire = self::DEFAULT_EXPIRE;
+
+		$this->SodiumRegistry = new Sodium;
+		$this->SodiumSession = new Sodium;
 	}
 
 	/**
@@ -503,10 +461,10 @@ class Havelock
 	 * Set/unset registry keys in cookies
 	 *
 	 * @param bool $status [optional]
-	 * @param Cookie $cookie [optional]
+	 * @param Cookie|null $cookie [optional]
 	 * @return $this
 	 */
-	public function cookie(bool $status = false, Cookie $cookie = null): Havelock
+	public function cookie(bool $status = false, ? Cookie $cookie = null): Havelock
 	{
 		if($cookie) {
 			$this->cookie = $cookie;
@@ -621,7 +579,7 @@ class Havelock
 			return $created && $saved;
 		}
 		else {
-			if(!$this->session || !$this->sessionKp || !$this->registryKp) {
+			if(!$this->session || !$this->SodiumSession->getKeyPair() || !$this->SodiumRegistry->getKeyPair()) {
 				return false;
 			}
 			$this->deleteRegistryFiles();
@@ -633,7 +591,7 @@ class Havelock
 	 * Try to load an existing session
 	 *
 	 * @return bool
-	 * @throws Exception
+	 * @throws SodiumException
 	 */
 	public function read(): bool
 	{
@@ -647,7 +605,7 @@ class Havelock
 			return false;
 		}
 
-		if(!$this->session || !$this->sessionKp) {
+		if(!$this->session || !$this->SodiumSession->getKeyPair()) {
 			$raw = '';
 			foreach ($this->keys as $registry) {
 				$path = $this->registryDir . DIRECTORY_SEPARATOR . $registry;
@@ -656,24 +614,25 @@ class Havelock
 				}
 				$raw .= $chunk;
 			}
-			if($raw && $serialized = $this->unseal($raw, $this->registryKp)) {
+			if($raw && $serialized = $this->SodiumRegistry->unseal($raw)) {
 				$params = unserialize($serialized);
 				if($id = $params['id'] ?? null) {
 					$this->session = $id;
 				}
 				if($kp = $params['kp'] ?? null) {
-					$this->sessionKp = base64_decode($kp) ?: null;
+					$kp = (string) base64_decode($kp);
+					$this->SodiumSession->setKeyPair($kp);
 				}
 			}
 		}
 
 		$path = $this->sessionDir . DIRECTORY_SEPARATOR . $this->session;
-		if($this->session && $this->sessionKp && is_file($path)) {
+		if($this->session && $this->SodiumSession->getKeyPair() && is_file($path)) {
 			$raw = file_get_contents($path);
-			if($raw && $serialized = $this->unseal($raw, $this->sessionKp)) {
+			if($raw && $serialized = $this->SodiumSession->unseal($raw)) {
 				$this->data = unserialize($serialized);
 			}
-			elseif(null === $raw) {
+			elseif(false === $raw) {
 				return false;
 			}
 			elseif(!$raw) {
@@ -690,31 +649,32 @@ class Havelock
 	/**
 	 * Save data in current session.
 	 *
-	 * @param array $overwrite []
+	 * @param array|null $overwrite []
 	 * @return bool
+	 * @throws SodiumException
 	 * @throws Exception
 	 */
-	public function save(array $overwrite = null): bool
+	public function save(? array $overwrite = null): bool
 	{
 		$path = $this->sessionDir . DIRECTORY_SEPARATOR . $this->session;
-		if(!$this->session || !$this->sessionKp || !is_file($path)) {
+		if(!$this->session || !$this->SodiumSession->getKeyPair() || !is_file($path)) {
 			return false;
 		}
 		if(null !== $overwrite) {
 			$this->data = $overwrite;
 		}
 		$serialized = serialize($this->data);
-		$encrypted = $this->seal($serialized, $this->sessionKp);
+		$encrypted = $this->SodiumSession->seal($serialized);
 		return $this->write($path, $encrypted);
 	}
 
 	/**
 	 * Expose current session data.
 	 *
-	 * @param array $overwrite [optional]
+	 * @param array|null $overwrite [optional]
 	 * @return array
 	 */
-	public function data(array $overwrite = null): array
+	public function data(? array $overwrite = null): array
 	{
 		if(null !== $overwrite) {
 			$this->data = $overwrite;
@@ -761,10 +721,10 @@ class Havelock
 	 * Offload expired sessions.
 	 *
 	 * @param int $rand [optional]
-	 * @param int $expire [optional]
+	 * @param int|null $expire [optional]
 	 * @return $this
 	 */
-	public function offload(int $rand = 0, int $expire = null): Havelock
+	public function offload(int $rand = 0, ? int $expire = null): Havelock
 	{
 		if(!rand(0, abs($rand))) {
 			$now = time();
@@ -791,6 +751,7 @@ class Havelock
 	 * Destroy an existing customer session
 	 *
 	 * @return $this
+	 * @throws SodiumException
 	 */
 	public function destroy(): Havelock
 	{
@@ -799,7 +760,7 @@ class Havelock
 
 		$this->keys = [];
 		$this->session = null;
-		$this->sessionKp = null;
+		$this->SodiumSession->resetKeys();
 		$this->data = null;
 		return $this;
 	}
@@ -808,11 +769,12 @@ class Havelock
 	 * Init new empty registry and sessions.
 	 *
 	 * @return bool
+	 * @throws SodiumException
 	 */
 	public function kill(): bool
 	{
 		$this->destroy();
-		$this->registryKp = null;
+		$this->SodiumRegistry->resetKeys();
 		$rmdir = $this->rmdir();
 		$mkdir = $this->mkdir();
 		return $rmdir && $mkdir;
