@@ -149,7 +149,7 @@ class Havelock
 		}
 
 		else {
-			$this->SodiumRegistry->generateKey();
+			$this->SodiumRegistry->generateKeys();
 			$skCiphered = $this->encrypt($this->SodiumRegistry->getSecretKey());
 			$pkCiphered = $this->encrypt($this->SodiumRegistry->getPublicKey());
 			if($skCiphered && $pkCiphered) {
