@@ -16,7 +16,7 @@
         "ext-openssl": "*",
         "ext-sodium": "*",
         "defuse/php-encryption": "^2.3.1",
-        "coercive/cookie": "^1.1.4"
+        "coercive/cookie": "^2"
     },
     "autoload": {
         "psr-4": { "Coercive\\Security\\Havelock\\": "dist/" }
