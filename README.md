@@ -2,6 +2,8 @@
 
 Experimental project: encrypted serialized data.
 
+Compatible PHP 7.4 → 8.5
+
 ## Get
 
 ```
@@ -93,7 +95,7 @@ $keys = $havelock->keys();
 
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
-# Refresh regstry tokens and cookies
+# Refresh registry tokens and cookies
 $havelock->refresh();
 
 # Delete current user session
@@ -102,4 +104,36 @@ $havelock->destroy();
 # Delete all expired session
 $havelock->offload();
 
+# Or only one time on 100 calls, for files older than 1 day
+$havelock->offload(99, 24 * 60 * 60);
+
 ```
+
+## Sodium
+
+Standalone handler for anonymous public key encryption (sealed box).
+
+```php
+use Coercive\Security\Havelock\Sodium;
+
+$sodium = (new Sodium)->generateKeys();
+
+# Store the keys somewhere safe
+$secret = $sodium->getSecretKey();
+$public = $sodium->getPublicKey();
+
+# Seal with the public key only
+$cipher = (new Sodium)->setKeys($secret, $public)->seal('my message');
+
+# Unseal with the key pair ('' on failure : wrong key, modified cipher)
+$message = (new Sodium)->setKeys($secret, $public)->unseal($cipher);
+```
+
+## Tests
+
+```
+composer install
+vendor/bin/phpunit
+```
+
+PHPUnit 12 requires PHP 8.3+ to run the tests ; the library itself still runs on PHP 7.4.

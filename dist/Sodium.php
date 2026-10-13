@@ -1,4 +1,6 @@
 <?php
+declare(strict_types=1);
+
 namespace Coercive\Security\Havelock;
 
 use Exception;
@@ -6,8 +8,16 @@ use SodiumException;
 
 /**
  * Sodium Handler
+ *
+ * Anonymous public key encryption (sealed box) : seal with the public key, unseal with the key pair.
+ *
+ * @package Coercive\Security\Havelock
+ *
+ * @author Anthony Moral <contact@coercive.fr>
+ * @copyright 2021 Anthony Moral
+ * @license MIT
  */
-class Sodium
+final class Sodium
 {
 	private string $keyPair = '';
 
@@ -42,7 +52,7 @@ class Sodium
 	/**
 	 * @return Sodium
 	 */
-	public function resetKeys(): Sodium
+	public function resetKeys(): self
 	{
 		$this->keyPair = '';
 		$this->publicKey = '';
@@ -53,10 +63,10 @@ class Sodium
 	/**
 	 * Generate Sodium key pair
 	 *
-	 * @return $this
+	 * @return Sodium
 	 * @throws SodiumException
 	 */
-	public function generateKeys(): Sodium
+	public function generateKeys(): self
 	{
 		return $this->setKeyPair(sodium_crypto_box_keypair());
 	}
@@ -65,14 +75,16 @@ class Sodium
 	 * Set key pair / and build alias public and secret key
 	 *
 	 * @param string $keyPair
-	 * @return $this
-	 * @throws SodiumException
+	 * @return Sodium
+	 * @throws SodiumException Invalid key pair
 	 */
-	public function setKeyPair(string $keyPair): Sodium
+	public function setKeyPair(string $keyPair): self
 	{
+		$secretKey = sodium_crypto_box_secretkey($keyPair);
+		$publicKey = sodium_crypto_box_publickey($keyPair);
 		$this->keyPair = $keyPair;
-		$this->secretKey = sodium_crypto_box_secretkey($this->keyPair);
-		$this->publicKey = sodium_crypto_box_publickey($this->keyPair);
+		$this->secretKey = $secretKey;
+		$this->publicKey = $publicKey;
 		return $this;
 	}
 
@@ -81,10 +93,10 @@ class Sodium
 	 *
 	 * @param string $secretKey
 	 * @param string $publicKey
-	 * @return $this
-	 * @throws SodiumException
+	 * @return Sodium
+	 * @throws SodiumException Invalid keys
 	 */
-	public function setKeys(string $secretKey, string $publicKey): Sodium
+	public function setKeys(string $secretKey, string $publicKey): self
 	{
 		$this->keyPair = sodium_crypto_box_keypair_from_secretkey_and_publickey($secretKey, $publicKey);
 		$this->secretKey = $secretKey;
@@ -97,14 +109,15 @@ class Sodium
 	 *
 	 * @param string $message
 	 * @return string
+	 * @throws Exception Public key not initialized or empty message
 	 * @throws SodiumException
 	 */
 	public function seal(string $message): string
 	{
-		if(!$this->publicKey) {
+		if('' === $this->publicKey) {
 			throw new Exception('Sodium: public key is not initialized.');
 		}
-		if(!$message) {
+		if('' === $message) {
 			throw new Exception('Sodium: no message to seal.');
 		}
 		return sodium_crypto_box_seal($message, $this->publicKey);
@@ -114,15 +127,16 @@ class Sodium
 	 * Unseal the cipher text
 	 *
 	 * @param string $cipherText
-	 * @return string
+	 * @return string Empty string on failure (wrong key, modified cipher)
+	 * @throws Exception Key pair not initialized or empty cipher text
 	 * @throws SodiumException
 	 */
 	public function unseal(string $cipherText): string
 	{
-		if(!$this->keyPair) {
+		if('' === $this->keyPair) {
 			throw new Exception('Sodium: key pair is not initialized.');
 		}
-		if(!$cipherText) {
+		if('' === $cipherText) {
 			throw new Exception('Sodium: no cipher text to unseal.');
 		}
 		return (string) sodium_crypto_box_seal_open($cipherText, $this->keyPair);

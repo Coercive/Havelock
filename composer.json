@@ -13,14 +13,23 @@
     ],
     "require": {
         "php": ">=7.4",
-        "ext-openssl": "*",
         "ext-sodium": "*",
-        "defuse/php-encryption": "^2.3.1",
+        "defuse/php-encryption": "^2.4",
         "coercive/cookie": "^2"
     },
-    "autoload": {
-        "psr-4": { "Coercive\\Security\\Havelock\\": "dist/" }
+    "require-dev": {
+        "phpunit/phpunit": "^12"
     },
-    "minimum-stability" : "dev",
-    "prefer-stable" : true
+    "autoload": {
+        "psr-4": {
+            "Coercive\\Security\\Havelock\\": "dist/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Coercive\\Security\\Havelock\\Tests\\": "tests/"
+        }
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true
 }
